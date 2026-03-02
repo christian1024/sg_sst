@@ -3,13 +3,16 @@ set -e
 
 cd /var/www/html
 
-# Si quieres evitar regenerar APP_KEY en prod, comenta esta sección y define APP_KEY por .env
+# Si no quieres generarla automáticamente, comenta esto y define APP_KEY en .env
 if [ -z "$APP_KEY" ] || [ "$APP_KEY" = "base64:" ]; then
   php artisan key:generate --force || true
 fi
 
-# Optimizar y migrar (para test/qa está bien; en prod mejor hacerlo desde pipeline)
+# Descubrir paquetes y optimizar caches
+php artisan package:discover --ansi || true
 php artisan optimize
+
+# Migraciones (útil en QA; en prod mejor desde el pipeline)
 php artisan migrate --force || true
 
 exec /usr/bin/supervisord -c /etc/supervisord.conf
