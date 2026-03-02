@@ -1,12 +1,11 @@
 trigger:
   branches:
-    include: [ main ]
+    include:
+      - main
 
 variables:
   imageName: 'miapp'
   imageTag: '$(Build.BuildId)'
-  vmPath: '/opt/laravel-app'
-  sshConn: 'ssh-vm-dev'           # <-- tu service connection SSH
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -16,23 +15,34 @@ stages:
   displayName: Build & Package Image
   jobs:
   - job: BuildAndPackage
+    displayName: Build and Publish Artifacts
     steps:
     - checkout: self
 
+    # (Opcional) Mostrar versión de Docker
+    - script: |
+        docker version
+      displayName: 'Check Docker'
+
+    # Habilitar builder moderno
     - task: DockerInstaller@0
       displayName: 'Enable buildx'
 
+    # Build y exportar la imagen como TAR + render de compose
     - script: |
         set -e
-        # Construir imagen
+        echo "Building image $(imageName):$(imageTag)..."
         docker build -t $(imageName):$(imageTag) -t $(imageName):latest -f docker/Dockerfile .
-        # Guardar la imagen en tar (artefacto)
+
+        echo "Packaging artifacts..."
         mkdir -p out
         docker save $(imageName):$(imageTag) -o out/$(imageName)-$(imageTag).tar
-        # Render del docker-compose.yml para usar la imagen por nombre:tag
+
+        # Render del docker-compose.yml usando la imagen con el tag del build
         sed "s|__IMAGE__|$(imageName):$(imageTag)|g" docker/docker-compose.yml > out/docker-compose.yml
       displayName: 'Build image and export as TAR'
 
+    # (Opcional) Generar un .env de ejemplo para pruebas posteriores
     - script: |
         set -e
         cat > out/.env << 'EOF'
@@ -57,41 +67,7 @@ stages:
         DB_PASSWORD: $(DB_PASSWORD)
         DB_ROOT_PASSWORD: $(DB_ROOT_PASSWORD)
 
+    # Publicar artefactos
     - publish: out
       artifact: image-bundle
       displayName: 'Publish artifact (image tar + compose + env)'
-
-- stage: Deploy
-  displayName: Deploy to VM (no registry)
-  dependsOn: Build
-  jobs:
-  - job: DeployToVM
-    steps:
-    - download: current
-      artifact: image-bundle
-
-    - task: CopyFilesOverSSH@0
-      displayName: 'Copy bundle to VM'
-      inputs:
-        sshEndpoint: '$(sshConn)'
-        sourceFolder: '$(Pipeline.Workspace)/image-bundle'
-        contents: |
-          *.tar
-          docker-compose.yml
-          .env
-        targetFolder: '$(vmPath)'
-
-    - task: SSH@0
-      displayName: 'Load image & docker compose up'
-      inputs:
-        sshEndpoint: '$(sshConn)'
-        script: |
-          set -e
-          cd $(vmPath)
-          TARBALL=$(ls *.tar | head -n1)
-          echo "Loading image from $TARBALL..."
-          docker load -i "$TARBALL"
-          echo "Starting services..."
-          docker compose pull mariadb || true
-          docker compose up -d
-          docker compose ps
