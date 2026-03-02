@@ -1,16 +1,23 @@
 # ---------- STAGE 1: composer ----------
 FROM composer:2 AS vendor
 WORKDIR /app
-COPY composer.json composer.lock ./
-RUN composer install --no-dev --prefer-dist --no-progress --no-interaction
+
+# Copiar TODO el proyecto primero para que exista artisan en el contenedor
 COPY . .
+
+# Instalar dependencias de PHP
+RUN composer install --no-dev --prefer-dist --no-progress --no-interaction
 RUN composer dump-autoload --optimize --no-dev
 
 # ---------- STAGE 2: vite build ----------
 FROM node:20-alpine AS assets
 WORKDIR /app
+
+# Copiamos solo manifiestos primero para cachear mejor
 COPY package*.json ./
 RUN npm ci || npm i
+
+# Copiamos el resto de archivos y construimos assets
 COPY . .
 RUN npm run build
 
@@ -34,7 +41,7 @@ COPY docker/supervisord.conf /etc/supervisord.conf
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Permisos mínimos necesarios
+# Usuario no root y permisos mínimos necesarios
 RUN addgroup -g 1000 app && adduser -D -G app -u 1000 app \
     && chown -R app:app /var/www/html
 USER app
